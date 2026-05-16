@@ -6,8 +6,11 @@ Provides a web interface and API for automated Google App Password generation.
 import json
 import queue
 import threading
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, Response, send_from_directory
 from automation import process_accounts
+
+load_dotenv()
 
 app = Flask(__name__, static_folder="public", static_url_path="")
 
@@ -77,6 +80,18 @@ def generate():
 
 
 if __name__ == "__main__":
-    print("🚀 Server starting on http://localhost:3000")
-    print("📋 Open your browser and paste your accounts to generate app passwords")
+    import os
+    nixus_url = os.environ.get("NIXUS_API_URL", "")
+    api_key = os.environ.get("AAPW_API_KEY", "")
+    if nixus_url and api_key:
+        try:
+            from poller import start_scheduler
+            start_scheduler()
+            print(f"Poller started — connected to {nixus_url}")
+        except Exception as e:
+            print(f"Poller failed to start: {e}")
+    else:
+        print("NIXUS_API_URL / AAPW_API_KEY not set — poller disabled")
+
+    print("Server starting on http://localhost:3000")
     app.run(host="0.0.0.0", port=3000, debug=False, threaded=True)

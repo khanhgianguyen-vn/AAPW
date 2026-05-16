@@ -6,6 +6,7 @@ Automates Google login (with 2FA via 2fa.live) and App Password creation.
 import re
 import time
 import traceback
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,6 +15,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+
+load_dotenv()
 
 
 def create_driver():
@@ -689,7 +692,8 @@ def process_account(email, password, recovery_email, secret_code, on_log=None):
     result = {
         "email": email,
         "app_password": None,
-        "status": "failed"
+        "status": "failed",
+        "error_detail": None,
     }
 
     try:
@@ -700,6 +704,7 @@ def process_account(email, password, recovery_email, secret_code, on_log=None):
         login_success = login_google(driver, email, password, recovery_email, secret_code, on_log)
         if not login_success:
             result["status"] = "login_failed"
+            result["error_detail"] = "Could not log in to Google account"
             return result
 
         # Create app password
@@ -709,10 +714,12 @@ def process_account(email, password, recovery_email, secret_code, on_log=None):
             result["status"] = "success"
         else:
             result["status"] = "app_password_failed"
+            result["error_detail"] = "Logged in but could not generate app password"
 
     except Exception as e:
         log(f"[{email}] ❌ Unexpected error: {str(e)}")
         result["status"] = "error"
+        result["error_detail"] = str(e)
     finally:
         if driver:
             try:
@@ -748,12 +755,13 @@ def process_accounts(accounts_text, on_log=None, on_result=None):
 
     for i, line in enumerate(lines, 1):
         parts = line.split("|")
-        if len(parts) != 4:
+        if len(parts) < 4:
             log(f"⚠️ Skipping invalid line {i}: '{line}' (expected format: email|password|recoveryEmail|secretCode)")
             results.append({
-                "email": line,
+                "email": parts[0].strip() if parts else line,
                 "app_password": None,
-                "status": "invalid_format"
+                "status": "invalid_format",
+                "error_detail": f"Got {len(parts)} fields, need 4",
             })
             continue
 
