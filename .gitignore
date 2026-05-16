@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+data/results.json
+data/runs/
+!data/.gitkeep
+debug_screenshot.png

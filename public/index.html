@@ -41,6 +41,47 @@
             margin-bottom: 30px;
         }
 
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: #12121f;
+            border-radius: 10px;
+            padding: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            background: transparent;
+            color: #888;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: #ccc;
+            background: #1a1a2e;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
         .card {
             background: #1a1a2e;
             border-radius: 12px;
@@ -121,10 +162,35 @@
             color: #a8b4ff;
             padding: 6px 14px;
             font-size: 0.8rem;
+            margin-top: 0;
         }
 
         .btn-copy:hover {
             background: #3a3a5a;
+        }
+
+        .btn-danger {
+            background: rgba(248, 113, 113, 0.15);
+            color: #f87171;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            margin-top: 0;
+        }
+
+        .btn-danger:hover {
+            background: rgba(248, 113, 113, 0.25);
+        }
+
+        .btn-export {
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            margin-top: 0;
+        }
+
+        .btn-export:hover {
+            background: rgba(74, 222, 128, 0.25);
         }
 
         /* Log area */
@@ -285,6 +351,81 @@
             white-space: pre-wrap;
             word-break: break-all;
         }
+
+        /* History */
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .history-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .run-card {
+            background: #12121f;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #222244;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .run-card:hover {
+            border-color: #667eea;
+            background: #1a1a30;
+        }
+
+        .run-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .run-id {
+            font-family: 'Consolas', monospace;
+            color: #a8b4ff;
+            font-size: 0.85rem;
+        }
+
+        .run-time {
+            color: #666;
+            font-size: 0.78rem;
+        }
+
+        .run-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 0.82rem;
+        }
+
+        .run-stats .stat-ok {
+            color: #4ade80;
+        }
+
+        .run-stats .stat-fail {
+            color: #f87171;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #555;
+        }
+
+        .empty-state-icon {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
 <body>
@@ -292,44 +433,98 @@
         <h1>🔐 Google App Password Generator</h1>
         <p class="subtitle">Tự động đăng nhập Google và tạo App Password</p>
 
-        <!-- Input Card -->
-        <div class="card">
-            <h2>📝 Nhập tài khoản</h2>
-            <textarea id="accountsInput" placeholder="Nhập theo format: email|password|emailkhoiphuc|secretcode&#10;&#10;Ví dụ:&#10;user1@gmail.com|mypassword123|recovery1@gmail.com|iv6rgljs7hqxef7djlfjrooliuz6y35l&#10;user2@gmail.com|anotherpass|recovery2@gmail.com|bk5vtvq7d2rbxxxxxxxxxxxxxxxx"></textarea>
-            <p class="hint">⚠️ Mỗi dòng 1 tài khoản. Format: email|password|emailKhoiPhuc|2FASecretCode. Tài khoản phải đã bật 2-Step Verification.</p>
-            <button class="btn btn-primary" id="startBtn" onclick="startGeneration()">
-                🚀 Bắt đầu tạo App Password
-            </button>
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('generate')">🚀 Tạo mới</button>
+            <button class="tab-btn" onclick="switchTab('history')">📜 Lịch sử</button>
         </div>
 
-        <!-- Progress Card -->
-        <div class="card hidden" id="progressCard">
-            <h2>📊 Tiến trình</h2>
-            <div class="log-area" id="logArea"></div>
-        </div>
+        <!-- Tab: Generate -->
+        <div class="tab-content active" id="tab-generate">
+            <!-- Input Card -->
+            <div class="card">
+                <h2>📝 Nhập tài khoản</h2>
+                <textarea id="accountsInput" placeholder="Nhập theo format: email|password|emailkhoiphuc|secretcode&#10;&#10;Ví dụ:&#10;user1@gmail.com|mypassword123|recovery1@gmail.com|iv6rgljs7hqxef7djlfjrooliuz6y35l&#10;user2@gmail.com|anotherpass|recovery2@gmail.com|bk5vtvq7d2rbxxxxxxxxxxxxxxxx"></textarea>
+                <p class="hint">⚠️ Mỗi dòng 1 tài khoản. Format: email|password|emailKhoiPhuc|2FASecretCode. Tài khoản phải đã bật 2-Step Verification.</p>
+                <button class="btn btn-primary" id="startBtn" onclick="startGeneration()">
+                    🚀 Bắt đầu tạo App Password
+                </button>
+            </div>
 
-        <!-- Results Card -->
-        <div class="card hidden" id="resultsCard">
-            <h2>✅ Kết quả</h2>
-            <div class="summary" id="summary"></div>
-            <table class="results-table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Email</th>
-                        <th>App Password</th>
-                        <th>Trạng thái</th>
-                    </tr>
-                </thead>
-                <tbody id="resultsBody"></tbody>
-            </table>
+            <!-- Progress Card -->
+            <div class="card hidden" id="progressCard">
+                <h2>📊 Tiến trình</h2>
+                <div class="log-area" id="logArea"></div>
+            </div>
 
-            <div class="copy-all-area hidden" id="copyAllArea">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <span style="color: #888; font-size: 0.85rem;">📋 Tất cả App Passwords (email|apppassword)</span>
-                    <button class="btn btn-copy" onclick="copyAllPasswords()">📋 Copy All</button>
+            <!-- Results Card -->
+            <div class="card hidden" id="resultsCard">
+                <h2>✅ Kết quả</h2>
+                <div class="summary" id="summary"></div>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Email</th>
+                            <th>App Password</th>
+                            <th>Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody"></tbody>
+                </table>
+
+                <div class="copy-all-area hidden" id="copyAllArea">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="color: #888; font-size: 0.85rem;">📋 Tất cả App Passwords (email|apppassword)</span>
+                        <button class="btn btn-copy" onclick="copyAllPasswords()">📋 Copy All</button>
+                    </div>
+                    <pre id="allPasswordsText"></pre>
                 </div>
-                <pre id="allPasswordsText"></pre>
+            </div>
+        </div>
+
+        <!-- Tab: History -->
+        <div class="tab-content" id="tab-history">
+            <div class="card">
+                <div class="history-header">
+                    <h2 style="margin-bottom: 0;">📜 Lịch sử kết quả</h2>
+                    <div class="history-actions">
+                        <a href="/api/results/export" class="btn btn-export">📥 Export CSV</a>
+                        <button class="btn btn-danger" onclick="clearHistory()">🗑️ Xóa tất cả</button>
+                    </div>
+                </div>
+                <div id="historyContent">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⏳</div>
+                        <p>Đang tải...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History detail card (shown when clicking a run) -->
+            <div class="card hidden" id="historyDetailCard">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h2 style="margin-bottom: 0;" id="historyDetailTitle">Chi tiết</h2>
+                    <button class="btn btn-copy" onclick="document.getElementById('historyDetailCard').classList.add('hidden')">✕ Đóng</button>
+                </div>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Email</th>
+                            <th>App Password</th>
+                            <th>Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyDetailBody"></tbody>
+                </table>
+                <div class="copy-all-area" id="historyDetailCopyArea" style="margin-top: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="color: #888; font-size: 0.85rem;">📋 App Passwords từ run này</span>
+                        <button class="btn btn-copy" onclick="copyHistoryPasswords()">📋 Copy All</button>
+                    </div>
+                    <pre id="historyDetailPasswords"></pre>
+                </div>
             </div>
         </div>
     </div>
@@ -337,6 +532,16 @@
     <script>
         let allResults = [];
 
+        // ── Tab Switching ──────────────────────────────
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            event.target.classList.add('active');
+            if (tab === 'history') loadHistory();
+        }
+
+        // ── Generate ───────────────────────────────────
         async function startGeneration() {
             const accountsText = document.getElementById('accountsInput').value.trim();
             if (!accountsText) {
@@ -376,7 +581,7 @@
 
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
-                    buffer = lines.pop(); // Keep incomplete line in buffer
+                    buffer = lines.pop();
 
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
@@ -436,10 +641,9 @@
             logArea.scrollTop = logArea.scrollHeight;
         }
 
-        function addResultRow(result, index) {
-            const tbody = document.getElementById('resultsBody');
+        function addResultRow(result, index, tbody = null) {
+            tbody = tbody || document.getElementById('resultsBody');
             const tr = document.createElement('tr');
-
             const statusClass = result.status === 'success' ? 'status-success' : 'status-failed';
             const statusText = result.status === 'success' ? 'Thành công' :
                               result.status === 'login_failed' ? 'Login thất bại' :
@@ -495,6 +699,91 @@
                 btn.textContent = '✅ Copied!';
                 setTimeout(() => { btn.textContent = '📋 Copy All'; }, 2000);
             });
+        }
+
+        // ── History ────────────────────────────────────
+        async function loadHistory() {
+            const container = document.getElementById('historyContent');
+            try {
+                const res = await fetch('/api/runs');
+                const runs = await res.json();
+
+                if (!runs.length) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <p>Chưa có lịch sử chạy nào.</p>
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = runs.map(run => `
+                    <div class="run-card" onclick="loadRunDetail('${run.run_id}')">
+                        <div class="run-info">
+                            <span class="run-id">Run #${run.run_id}</span>
+                            <span class="run-time">${new Date(run.timestamp).toLocaleString('vi-VN')}</span>
+                        </div>
+                        <div class="run-stats">
+                            <span>📊 ${run.total} total</span>
+                            <span class="stat-ok">✅ ${run.success}</span>
+                            <span class="stat-fail">❌ ${run.failed}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state"><p style="color:#f87171">Lỗi tải lịch sử: ${e.message}</p></div>`;
+            }
+        }
+
+        async function loadRunDetail(runId) {
+            const card = document.getElementById('historyDetailCard');
+            const tbody = document.getElementById('historyDetailBody');
+            const title = document.getElementById('historyDetailTitle');
+            const passwords = document.getElementById('historyDetailPasswords');
+
+            card.classList.remove('hidden');
+            title.textContent = `Chi tiết Run #${runId}`;
+            tbody.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/runs/${runId}`);
+                const data = await res.json();
+
+                data.results.forEach((r, i) => addResultRow(r, i + 1, tbody));
+
+                const successResults = data.results.filter(r => r.status === 'success' && r.app_password);
+                if (successResults.length) {
+                    document.getElementById('historyDetailCopyArea').style.display = '';
+                    passwords.textContent = successResults.map(r => `${r.email}|${r.app_password}`).join('\n');
+                } else {
+                    document.getElementById('historyDetailCopyArea').style.display = 'none';
+                }
+
+                // Scroll to detail card
+                card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="color:#f87171">Lỗi: ${e.message}</td></tr>`;
+            }
+        }
+
+        function copyHistoryPasswords() {
+            const text = document.getElementById('historyDetailPasswords').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => { btn.textContent = '📋 Copy All'; }, 2000);
+            });
+        }
+
+        async function clearHistory() {
+            if (!confirm('Xóa tất cả lịch sử? Không thể hoàn tác.')) return;
+            try {
+                await fetch('/api/results/clear', { method: 'POST' });
+                loadHistory();
+                document.getElementById('historyDetailCard').classList.add('hidden');
+            } catch (e) {
+                alert('Lỗi: ' + e.message);
+            }
         }
 
         function escapeHtml(str) {
