@@ -285,12 +285,144 @@
             white-space: pre-wrap;
             word-break: break-all;
         }
+
+        /* Captcha Banner */
+        .captcha-banner {
+            display: none;
+            background: rgba(251, 191, 36, 0.08);
+            border: 2px solid #fbbf24;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .captcha-banner.active {
+            display: block;
+        }
+
+        .captcha-title {
+            color: #fbbf24;
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .captcha-msg {
+            color: #e0e0e0;
+            font-size: 0.92rem;
+            line-height: 1.6;
+            margin-bottom: 18px;
+        }
+
+        .btn-captcha {
+            background: #fbbf24;
+            color: #0f0f1a;
+            font-weight: 700;
+            font-size: 1rem;
+            padding: 12px 32px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-captcha:hover {
+            background: #f59e0b;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(251, 191, 36, 0.4);
+        }
+
+        .btn-captcha:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Status Filter */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .filter-label { color: #888; font-size: 0.82rem; margin-right: 4px; }
+
+        .btn-filter {
+            padding: 5px 14px;
+            border-radius: 20px;
+            border: 1px solid #333360;
+            background: #12121f;
+            color: #888;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-filter:hover { border-color: #667eea; color: #a8b4ff; }
+        .btn-filter.active         { background: #667eea; border-color: #667eea; color: white; }
+        .btn-filter.active-success { background: rgba(74,222,128,0.2); border-color: #4ade80; color: #4ade80; }
+        .btn-filter.active-failed  { background: rgba(248,113,113,0.2); border-color: #f87171; color: #f87171; }
+
+        /* Send to Nixus */
+        .nixus-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .btn-nixus {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 26px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            transition: all 0.3s;
+        }
+
+        .btn-nixus:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(124,58,237,0.4); }
+        .btn-nixus:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        .nixus-status {
+            font-size: 0.88rem;
+            padding: 8px 14px;
+            border-radius: 6px;
+        }
+
+        .nixus-status.ok   { background: rgba(74,222,128,0.12); color: #4ade80; }
+        .nixus-status.warn { background: rgba(251,191,36,0.12);  color: #fbbf24; }
+        .nixus-status.err  { background: rgba(248,113,113,0.12); color: #f87171; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🔐 Google App Password Generator</h1>
         <p class="subtitle">Tự động đăng nhập Google và tạo App Password</p>
+
+        <!-- Captcha Banner -->
+        <div class="captcha-banner" id="captchaBanner">
+            <div class="captcha-title">⚠️ CAPTCHA Detected!</div>
+            <div class="captcha-msg">
+                A CAPTCHA has appeared in the browser window.<br>
+                Please solve it manually, then click the button below to resume the script.
+            </div>
+            <button class="btn-captcha" id="captchaBtn" onclick="resolveCaptcha()">
+                ✅ I've Solved the CAPTCHA — Continue
+            </button>
+        </div>
 
         <!-- Input Card -->
         <div class="card">
@@ -312,6 +444,14 @@
         <div class="card hidden" id="resultsCard">
             <h2>✅ Kết quả</h2>
             <div class="summary" id="summary"></div>
+
+            <div class="filter-bar">
+                <span class="filter-label">Filter:</span>
+                <button class="btn-filter active" data-filter="all" onclick="applyFilter('all')">All</button>
+                <button class="btn-filter" data-filter="success" onclick="applyFilter('success')">✅ Success</button>
+                <button class="btn-filter" data-filter="failed" onclick="applyFilter('failed')">❌ Failed</button>
+            </div>
+
             <table class="results-table">
                 <thead>
                     <tr>
@@ -331,11 +471,96 @@
                 </div>
                 <pre id="allPasswordsText"></pre>
             </div>
+
+            <div class="nixus-row">
+                <button class="btn-nixus" id="nixusBtn" onclick="sendToNixus()">🚀 Send to Nixus</button>
+                <span class="nixus-status hidden" id="nixusStatus"></span>
+            </div>
         </div>
     </div>
 
     <script>
         let allResults = [];
+        let currentFilter = 'all';
+
+        function applyFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.btn-filter').forEach(btn => {
+                btn.className = 'btn-filter';
+                if (btn.dataset.filter === filter) {
+                    btn.classList.add(
+                        filter === 'success' ? 'active-success' :
+                        filter === 'failed'  ? 'active-failed'  : 'active'
+                    );
+                }
+            });
+            document.querySelectorAll('#resultsBody tr').forEach(tr => {
+                const s = tr.dataset.status;
+                tr.style.display = (
+                    filter === 'all' ||
+                    (filter === 'success' && s === 'success') ||
+                    (filter === 'failed'  && s !== 'success')
+                ) ? '' : 'none';
+            });
+        }
+
+        async function sendToNixus() {
+            const btn = document.getElementById('nixusBtn');
+            const statusEl = document.getElementById('nixusStatus');
+            const successResults = allResults.filter(r => r.status === 'success' && r.app_password);
+
+            if (successResults.length === 0) {
+                statusEl.textContent = 'No successful results to send.';
+                statusEl.className = 'nixus-status err';
+                statusEl.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Sending...';
+            statusEl.classList.add('hidden');
+
+            try {
+                const resp = await fetch('/api/send-to-nixus', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results: successResults })
+                });
+                const data = await resp.json();
+
+                if (data.error) {
+                    statusEl.textContent = `❌ ${data.error}`;
+                    statusEl.className = 'nixus-status err';
+                } else if (data.failed > 0 && data.sent === 0) {
+                    statusEl.textContent = `❌ All ${data.failed} failed. Check NIXUS_API_URL / AAPW_API_KEY.`;
+                    statusEl.className = 'nixus-status err';
+                } else if (data.failed > 0) {
+                    statusEl.textContent = `⚠️ Sent ${data.sent}, failed ${data.failed}.`;
+                    statusEl.className = 'nixus-status warn';
+                } else {
+                    statusEl.textContent = `✅ Sent ${data.sent} account(s) to Nixus.`;
+                    statusEl.className = 'nixus-status ok';
+                }
+            } catch (e) {
+                statusEl.textContent = `❌ ${e.message}`;
+                statusEl.className = 'nixus-status err';
+            }
+
+            statusEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.innerHTML = '🚀 Send to Nixus';
+        }
+
+        async function resolveCaptcha() {
+            const btn = document.getElementById('captchaBtn');
+            btn.disabled = true;
+            btn.textContent = 'Resuming...';
+            try {
+                await fetch('/api/captcha-resolved', { method: 'POST' });
+            } catch (e) {
+                // ignore
+            }
+        }
 
         async function startGeneration() {
             const accountsText = document.getElementById('accountsInput').value.trim();
@@ -355,9 +580,12 @@
             startBtn.innerHTML = '<span class="spinner"></span> Đang xử lý...';
             progressCard.classList.remove('hidden');
             resultsCard.classList.add('hidden');
+            document.getElementById('captchaBanner').classList.remove('active');
+            document.getElementById('nixusStatus').classList.add('hidden');
             logArea.innerHTML = '';
             resultsBody.innerHTML = '';
             allResults = [];
+            applyFilter('all');
 
             try {
                 const response = await fetch('/api/generate', {
@@ -403,6 +631,18 @@
                     const logClass = getLogClass(data.message);
                     addLog(data.message, logClass);
                     break;
+                case 'captcha':
+                    document.getElementById('captchaBanner').classList.add('active');
+                    addLog('⚠️ CAPTCHA detected! Solve it in the browser and click Continue.', 'warn');
+                    break;
+                case 'captcha_resolved': {
+                    document.getElementById('captchaBanner').classList.remove('active');
+                    const btn = document.getElementById('captchaBtn');
+                    btn.disabled = false;
+                    btn.textContent = "✅ I've Solved the CAPTCHA — Continue";
+                    addLog('✅ CAPTCHA resolved, resuming...', 'success');
+                    break;
+                }
                 case 'result':
                     allResults.push(data.data);
                     addResultRow(data.data, allResults.length);
@@ -439,6 +679,11 @@
         function addResultRow(result, index) {
             const tbody = document.getElementById('resultsBody');
             const tr = document.createElement('tr');
+            tr.dataset.status = result.status;
+            if ((currentFilter === 'success' && result.status !== 'success') ||
+                (currentFilter === 'failed'  && result.status === 'success')) {
+                tr.style.display = 'none';
+            }
 
             const statusClass = result.status === 'success' ? 'status-success' : 'status-failed';
             const statusText = result.status === 'success' ? 'Thành công' :

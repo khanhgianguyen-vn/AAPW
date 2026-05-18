@@ -3,9 +3,14 @@ Google App Password Auto-Generator - Selenium Automation Module
 Automates Google login (with 2FA via 2fa.live) and App Password creation.
 """
 
+import json
+import os
+import random
 import re
+import tempfile
 import time
 import traceback
+import zipfile
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -18,8 +23,64 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 load_dotenv()
 
+PROXIES = [
+    "72.46.138.141:6367:zhvqmsce:7t59x0dxzmlz",
+    "138.226.77.10:7199:zhvqmsce:7t59x0dxzmlz",
+    "9.142.221.89:5253:zhvqmsce:7t59x0dxzmlz",
+    "45.58.228.31:5703:zhvqmsce:7t59x0dxzmlz",
+    "216.170.122.132:6170:zhvqmsce:7t59x0dxzmlz",
+    "192.46.187.233:6811:zhvqmsce:7t59x0dxzmlz",
+    "192.53.142.87:5784:zhvqmsce:7t59x0dxzmlz",
+    "64.52.31.224:6411:zhvqmsce:7t59x0dxzmlz",
+    "72.1.153.245:5637:zhvqmsce:7t59x0dxzmlz",
+    "192.53.66.191:6297:zhvqmsce:7t59x0dxzmlz",
+    "185.253.122.136:5945:zhvqmsce:7t59x0dxzmlz",
+    "45.56.137.83:9148:zhvqmsce:7t59x0dxzmlz",
+    "69.91.142.165:7657:zhvqmsce:7t59x0dxzmlz",
+    "130.180.237.251:7194:zhvqmsce:7t59x0dxzmlz",
+    "72.46.139.218:6778:zhvqmsce:7t59x0dxzmlz",
+    "9.142.221.92:5256:zhvqmsce:7t59x0dxzmlz",
+    "104.243.210.9:5657:zhvqmsce:7t59x0dxzmlz",
+    "192.53.66.50:6156:zhvqmsce:7t59x0dxzmlz",
+    "45.56.180.176:8410:zhvqmsce:7t59x0dxzmlz",
+    "193.160.83.51:6372:zhvqmsce:7t59x0dxzmlz",
+]
 
-def create_driver():
+
+def _make_proxy_extension(host, port, user, password):
+    """Build a temporary Chrome extension zip that routes traffic through an authenticated proxy."""
+    manifest = json.dumps({
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Proxy Auth",
+        "permissions": [
+            "proxy", "tabs", "unlimitedStorage", "storage",
+            "<all_urls>", "webRequest", "webRequestBlocking"
+        ],
+        "background": {"scripts": ["background.js"]}
+    })
+    background = f"""var config = {{
+    mode: "fixed_servers",
+    rules: {{
+        singleProxy: {{scheme: "http", host: "{host}", port: parseInt("{port}")}},
+        bypassList: ["localhost"]
+    }}
+}};
+chrome.proxy.settings.set({{value: config, scope: "regular"}}, function(){{}});
+chrome.webRequest.onAuthRequired.addListener(
+    function() {{ return {{authCredentials: {{username: "{user}", password: "{password}"}}}}; }},
+    {{urls: ["<all_urls>"]}},
+    ["blocking"]
+);"""
+    tmpdir = tempfile.mkdtemp(prefix="aapw_proxy_")
+    ext_zip = os.path.join(tmpdir, "proxy.zip")
+    with zipfile.ZipFile(ext_zip, "w") as zf:
+        zf.writestr("manifest.json", manifest)
+        zf.writestr("background.js", background)
+    return ext_zip
+
+
+def create_driver(proxy=None):
     """Create a Chrome WebDriver instance (non-headless for visibility)."""
     chrome_options = Options()
     chrome_options.add_argument("--start-maximized")
@@ -32,6 +93,11 @@ def create_driver():
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
+    if proxy:
+        host, port, user, password = proxy.split(":")
+        ext_zip = _make_proxy_extension(host, port, user, password)
+        chrome_options.add_extension(ext_zip)
+
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
@@ -39,6 +105,44 @@ def create_driver():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     return driver
+
+
+def detect_captcha(driver):
+    """Return True if the current page appears to show a CAPTCHA challenge."""
+    try:
+        src = driver.page_source.lower()
+        signals = [
+            'recaptcha', 'g-recaptcha', 'grecaptcha',
+            "i'm not a robot", 'i am not a robot',
+            'unusual traffic', "verify you're not a robot",
+            'verify you are not a robot', 'captcha',
+        ]
+        if any(s in src for s in signals):
+            return True
+        if 'captcha' in driver.current_url.lower():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _check_captcha(driver, email, on_captcha, on_log):
+    """If a CAPTCHA is detected, notify via on_captcha callback and wait for resolution."""
+    def log(msg):
+        if on_log:
+            on_log(msg)
+        print(msg)
+
+    if not detect_captcha(driver):
+        return
+
+    log(f"[{email}] ⚠️ CAPTCHA detected! Solve it in the browser window, then click 'Continue'.")
+    if on_captcha:
+        on_captcha()
+        log(f"[{email}] ✅ CAPTCHA resolved. Resuming...")
+    else:
+        log(f"[{email}] Waiting 30s for CAPTCHA resolution...")
+        time.sleep(30)
 
 
 def get_2fa_code(driver, secret_code, email, on_log=None):
@@ -146,7 +250,7 @@ def get_2fa_code(driver, secret_code, email, on_log=None):
         return None
 
 
-def login_google(driver, email, password, recovery_email, secret_code, on_log=None):
+def login_google(driver, email, password, recovery_email, secret_code, on_log=None, on_captcha=None):
     """
     Login to Google account with 2FA support.
 
@@ -285,6 +389,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
         # Step 2: Enter password
         log(f"[{email}] Entering password...")
         time.sleep(2)
+        _check_captcha(driver, email, on_captcha, on_log)
         password_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[type="password"]')))
         password_input.clear()
         password_input.send_keys(password)
@@ -293,6 +398,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
 
         # Step 3: Wait and check what Google asks for next
         time.sleep(3)
+        _check_captcha(driver, email, on_captcha, on_log)
 
         # Dismiss passkey / "sign in faster" prompts if they appear
         dismiss_google_prompts()
@@ -482,7 +588,7 @@ def handle_2fa_challenge(driver, secret_code, email, on_log=None):
     return True
 
 
-def create_app_password(driver, email, secret_code, on_log=None):
+def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None):
     """
     Navigate to App Passwords page and create a new app password.
     Handles 2FA re-verification if prompted.
@@ -506,6 +612,7 @@ def create_app_password(driver, email, secret_code, on_log=None):
         driver.get("https://myaccount.google.com/apppasswords")
         wait = WebDriverWait(driver, 15)
         time.sleep(3)
+        _check_captcha(driver, email, on_captcha, on_log)
 
         current_url = driver.current_url
         log(f"[{email}] Current URL: {current_url}")
@@ -669,7 +776,7 @@ def create_app_password(driver, email, secret_code, on_log=None):
         return None
 
 
-def process_account(email, password, recovery_email, secret_code, on_log=None):
+def process_account(email, password, recovery_email, secret_code, on_log=None, on_captcha=None):
     """
     Process a single account: login (with 2FA) and create app password.
 
@@ -697,18 +804,19 @@ def process_account(email, password, recovery_email, secret_code, on_log=None):
     }
 
     try:
-        log(f"[{email}] Starting browser...")
-        driver = create_driver()
+        proxy = random.choice(PROXIES)
+        log(f"[{email}] Starting browser... (proxy: {proxy.split(':')[0]}:{proxy.split(':')[1]})")
+        driver = create_driver(proxy=proxy)
 
         # Login with 2FA
-        login_success = login_google(driver, email, password, recovery_email, secret_code, on_log)
+        login_success = login_google(driver, email, password, recovery_email, secret_code, on_log, on_captcha)
         if not login_success:
             result["status"] = "login_failed"
             result["error_detail"] = "Could not log in to Google account"
             return result
 
         # Create app password
-        app_password = create_app_password(driver, email, secret_code, on_log)
+        app_password = create_app_password(driver, email, secret_code, on_log, on_captcha)
         if app_password:
             result["app_password"] = app_password
             result["status"] = "success"
@@ -731,7 +839,7 @@ def process_account(email, password, recovery_email, secret_code, on_log=None):
     return result
 
 
-def process_accounts(accounts_text, on_log=None, on_result=None):
+def process_accounts(accounts_text, on_log=None, on_result=None, on_captcha=None):
     """
     Process multiple accounts from text input.
 
@@ -755,26 +863,32 @@ def process_accounts(accounts_text, on_log=None, on_result=None):
 
     for i, line in enumerate(lines, 1):
         parts = line.split("|")
-        if len(parts) < 4:
-            log(f"⚠️ Skipping invalid line {i}: '{line}' (expected format: email|password|recoveryEmail|secretCode)")
+        if len(parts) < 3:
+            log(f"⚠️ Skipping invalid line {i}: '{line}' (expected: email|password|secretCode or email|password|recoveryEmail|secretCode)")
             results.append({
                 "email": parts[0].strip() if parts else line,
                 "app_password": None,
                 "status": "invalid_format",
-                "error_detail": f"Got {len(parts)} fields, need 4",
+                "error_detail": f"Got {len(parts)} fields, need at least 3",
             })
             continue
 
         email = parts[0].strip()
         password = parts[1].strip()
-        recovery_email = parts[2].strip()
-        secret_code = parts[3].strip()
+        if len(parts) == 3:
+            # Short format: email|password|secretCode (no recovery email)
+            recovery_email = ""
+            secret_code = parts[2].strip()
+        else:
+            # Full format: email|password|recoveryEmail|secretCode
+            recovery_email = parts[2].strip()
+            secret_code = parts[3].strip()
 
         log(f"\n{'='*60}")
         log(f"🔄 Processing account {i}/{len(lines)}: {email}")
         log(f"{'='*60}")
 
-        result = process_account(email, password, recovery_email, secret_code, on_log)
+        result = process_account(email, password, recovery_email, secret_code, on_log, on_captcha)
         results.append(result)
 
         if on_result:

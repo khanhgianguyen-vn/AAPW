@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -112,7 +111,6 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=POLL_INTERVAL_MINUTES),
         id="aapw_poll",
         replace_existing=True,
-        next_run_time=datetime.utcnow(),  # run immediately on start
     )
     scheduler.start()
     log.info(f"Poller started — polling every {POLL_INTERVAL_MINUTES} minute(s)")
