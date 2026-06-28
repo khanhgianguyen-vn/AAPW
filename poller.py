@@ -120,6 +120,10 @@ def start_scheduler():
 if __name__ == "__main__":
     log.info("AAPW Poller starting (standalone mode)")
     scheduler = start_scheduler()
+
+    # Run immediately on startup instead of waiting for the first interval
+    threading.Thread(target=run_poll, daemon=True).start()
+
     try:
         while True:
             time.sleep(60)

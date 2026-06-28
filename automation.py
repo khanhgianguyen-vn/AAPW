@@ -19,6 +19,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
 load_dotenv()
@@ -80,6 +81,35 @@ chrome.webRequest.onAuthRequired.addListener(
     return ext_zip
 
 
+def _type_text(element, text):
+    """Type text character-by-character with randomised delays to mimic human input."""
+    for char in text:
+        element.send_keys(char)
+        if random.random() < 0.08:
+            time.sleep(random.uniform(0.2, 0.5))
+        else:
+            time.sleep(random.uniform(0.04, 0.18))
+
+
+def _human_click(driver, element):
+    """Move the mouse to an element with human-like randomness, then click."""
+    actions = ActionChains(driver)
+    w = element.rect.get('width', 0)
+    h = element.rect.get('height', 0)
+    # Land on a random point within the inner 60% of the element, not always dead-center
+    offset_x = random.uniform(-w * 0.3, w * 0.3)
+    offset_y = random.uniform(-h * 0.3, h * 0.3)
+    actions.move_to_element_with_offset(element, offset_x, offset_y)
+    # Micro-tremor movements a human hand makes while settling on a target
+    for _ in range(random.randint(1, 3)):
+        actions.move_by_offset(random.uniform(-2, 2), random.uniform(-2, 2))
+        actions.pause(random.uniform(0.02, 0.07))
+    actions.pause(random.uniform(0.05, 0.15))
+    actions.click()
+    actions.perform()
+    time.sleep(random.uniform(0.1, 0.25))
+
+
 def create_driver(proxy=None):
     """Create a Chrome WebDriver instance (non-headless for visibility)."""
     chrome_options = Options()
@@ -108,19 +138,48 @@ def create_driver(proxy=None):
 
 
 def detect_captcha(driver):
-    """Return True if the current page appears to show a CAPTCHA challenge."""
+    """Return True if the current page shows a visible CAPTCHA challenge the user must solve."""
     try:
-        src = driver.page_source.lower()
-        signals = [
-            'recaptcha', 'g-recaptcha', 'grecaptcha',
-            "i'm not a robot", 'i am not a robot',
-            'unusual traffic', "verify you're not a robot",
-            'verify you are not a robot', 'captcha',
-        ]
-        if any(s in src for s in signals):
-            return True
         if 'captcha' in driver.current_url.lower():
             return True
+
+        # Check rendered visible text only — page_source always contains reCAPTCHA JS
+        body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        visible_signals = [
+            "i'm not a robot",
+            "i am not a robot",
+            "unusual traffic",
+            "verify you're not a robot",
+            "verify you are not a robot",
+        ]
+        if any(s in body_text for s in visible_signals):
+            return True
+
+        # Only flag a visible reCAPTCHA challenge iframe, not the invisible badge
+        iframes = driver.find_elements(
+            By.CSS_SELECTOR, 'iframe[title*="challenge" i]'
+        )
+        if any(f.is_displayed() for f in iframes):
+            return True
+
+        # Audio captcha button — Google shows "Listen and type the numbers you hear"
+        # when it suspects automation at the email-entry step
+        audio_btns = driver.find_elements(
+            By.CSS_SELECTOR, 'button[aria-label*="Listen" i], button[aria-label*="numbers you hear" i]'
+        )
+        if any(b.is_displayed() for b in audio_btns):
+            return True
+
+        # "Verify it's you" or similar challenge pages
+        challenge_signals = [
+            "verify it's you",
+            "confirm it's you",
+            "verify your identity",
+            "xác minh danh tính",
+        ]
+        if any(s in body_text for s in challenge_signals):
+            return True
+
     except Exception:
         pass
     return False
@@ -136,10 +195,10 @@ def _check_captcha(driver, email, on_captcha, on_log):
     if not detect_captcha(driver):
         return
 
-    log(f"[{email}] ⚠️ CAPTCHA detected! Solve it in the browser window, then click 'Continue'.")
+    log(f"[{email}] [WARN] CAPTCHA detected! Solve it in the browser window, then click 'Continue'.")
     if on_captcha:
         on_captcha()
-        log(f"[{email}] ✅ CAPTCHA resolved. Resuming...")
+        log(f"[{email}] [OK] CAPTCHA resolved. Resuming...")
     else:
         log(f"[{email}] Waiting 30s for CAPTCHA resolution...")
         time.sleep(30)
@@ -180,7 +239,7 @@ def get_2fa_code(driver, secret_code, email, on_log=None):
         handles_after = set(driver.window_handles)
         new_handles = handles_after - handles_before
         if not new_handles:
-            log(f"[{email}] ⚠️ No new tab detected, trying last handle...")
+            log(f"[{email}] [WARN] No new tab detected, trying last handle...")
             new_tab = driver.window_handles[-1]
         else:
             new_tab = new_handles.pop()
@@ -195,13 +254,13 @@ def get_2fa_code(driver, secret_code, email, on_log=None):
         log(f"[{email}] Entering secret code into 2fa.live...")
         token_input = wait.until(EC.visibility_of_element_located((By.ID, "listToken")))
         token_input.clear()
-        token_input.send_keys(secret_code)
+        _type_text(token_input, secret_code)
         time.sleep(1)
 
         # Click Submit button
         log(f"[{email}] Clicking Submit...")
         submit_btn = wait.until(EC.element_to_be_clickable((By.ID, "submit")))
-        submit_btn.click()
+        _human_click(driver, submit_btn)
         time.sleep(3)
 
         # Extract 2FA code from output textarea
@@ -225,9 +284,9 @@ def get_2fa_code(driver, secret_code, email, on_log=None):
             time.sleep(1)
 
         if totp_code:
-            log(f"[{email}] ✅ Got 2FA code: {totp_code}")
+            log(f"[{email}] [OK] Got 2FA code: {totp_code}")
         else:
-            log(f"[{email}] ❌ Could not extract 2FA code from 2fa.live")
+            log(f"[{email}] [FAIL] Could not extract 2FA code from 2fa.live")
 
         # Close the 2fa.live tab and switch back to original
         driver.close()
@@ -236,7 +295,7 @@ def get_2fa_code(driver, secret_code, email, on_log=None):
         return totp_code
 
     except Exception as e:
-        log(f"[{email}] ❌ Error getting 2FA code: {str(e)}")
+        log(f"[{email}] [FAIL] Error getting 2FA code: {str(e)}")
         traceback.print_exc()
         # Clean up: close ALL extra tabs and switch back to original
         try:
@@ -276,30 +335,42 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
         for nav_attempt in range(1, 4):
             log(f"[{email}] Navigating to Google login... (attempt {nav_attempt}/3)")
             driver.get("https://accounts.google.com/signin")
-            time.sleep(2)
+            # Extra wait on first attempt so the proxy connection can settle
+            time.sleep(4 if nav_attempt == 1 else 2)
 
             try:
-                wait = WebDriverWait(driver, 10)
-                email_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[type="email"]')))
-                break  # Found login page
+                # 20s timeout — proxies add meaningful latency
+                wait = WebDriverWait(driver, 20)
+                # Try known Google email input selectors in order of reliability
+                for selector in ['#identifierId', 'input[name="identifier"]', 'input[type="email"]']:
+                    try:
+                        email_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, selector)))
+                        log(f"[{email}] Found email input via selector: {selector}")
+                        break
+                    except Exception:
+                        pass
+                if email_input:
+                    break  # Found login page
             except Exception:
                 current_url = driver.current_url
-                log(f"[{email}] ⚠️ Login page not found (URL: {current_url}), retrying...")
-                # Try clearing cookies/session and going to signout first
-                try:
-                    driver.get("https://accounts.google.com/Logout")
-                    time.sleep(2)
-                except Exception:
-                    pass
+                log(f"[{email}] [WARN] Email input not found (URL: {current_url}), retrying...")
+                # Only do a logout flush if we're NOT already on a signin/identifier page
+                # (if we are, the page loaded fine — just retry the wait)
+                if "signin" not in current_url and "identifier" not in current_url:
+                    try:
+                        driver.get("https://accounts.google.com/Logout")
+                        time.sleep(2)
+                    except Exception:
+                        pass
 
         if not email_input:
-            log(f"[{email}] ❌ Could not reach Google login page after 3 attempts")
+            log(f"[{email}] [FAIL] Could not reach Google login page after 3 attempts")
             return False
 
         # Enter email
         log(f"[{email}] Entering email...")
         email_input.clear()
-        email_input.send_keys(email)
+        _type_text(email_input, email)
         time.sleep(0.5)
         email_input.send_keys(Keys.ENTER)
 
@@ -324,7 +395,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
                     for btn in btns:
                         if btn.is_displayed():
                             log(f"[{email}] Dismissing prompt (clicked '{text}')...")
-                            btn.click()
+                            _human_click(driver, btn)
                             time.sleep(2)
                             dismissed = True
                             break
@@ -341,7 +412,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
                         for link in links:
                             if link.is_displayed():
                                 log(f"[{email}] Dismissing prompt link (clicked '{text}')...")
-                                link.click()
+                                _human_click(driver, link)
                                 time.sleep(2)
                                 dismissed = True
                                 break
@@ -357,7 +428,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
                     for btn in not_now_btn:
                         if btn.is_displayed():
                             log(f"[{email}] Dismissing passkey prompt (jsname selector)...")
-                            btn.click()
+                            _human_click(driver, btn)
                             time.sleep(2)
                             dismissed = True
                             break
@@ -369,7 +440,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
             try:
                 cur = driver.current_url
                 if "/account/about" in cur:
-                    log(f"[{email}] ⚠️ Redirected to about page ({cur}), navigating back to login...")
+                    log(f"[{email}] [WARN] Redirected to about page ({cur}), navigating back to login...")
                     driver.get("https://accounts.google.com/signin")
                     time.sleep(2)
             except Exception:
@@ -380,19 +451,39 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
             try:
                 cur = driver.current_url
                 if "/account/about" in cur:
-                    log(f"[{email}] ⚠️ Redirected to about page ({cur}), navigating back to login...")
+                    log(f"[{email}] [WARN] Redirected to about page ({cur}), navigating back to login...")
                     driver.get("https://accounts.google.com/signin")
                     time.sleep(2)
             except Exception:
                 pass
 
+        # Step 2: Check if Google blocked at the email step (stayed on identifier page)
+        time.sleep(2)
+        if "signin/identifier" in driver.current_url or "v3/signin/identifier" in driver.current_url:
+            log(f"[{email}] [WARN] Still on identifier page — Google may be challenging the login")
+            _check_captcha(driver, email, on_captcha, on_log)
+            # If captcha was detected and handled, wait a moment then check again
+            time.sleep(2)
+            if "signin/identifier" in driver.current_url:
+                log(f"[{email}] [FAIL] Google session blocked at email step — try a different proxy or wait before retrying")
+                return False
+
         # Step 2: Enter password
         log(f"[{email}] Entering password...")
-        time.sleep(2)
         _check_captcha(driver, email, on_captcha, on_log)
-        password_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[type="password"]')))
+        password_input = None
+        for selector in ['input[name="Passwd"]', 'input[name="password"]', 'input[type="password"]']:
+            try:
+                password_input = WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, selector)))
+                log(f"[{email}] Found password input via selector: {selector}")
+                break
+            except Exception:
+                pass
+        if not password_input:
+            log(f"[{email}] [FAIL] Could not find password input")
+            return False
         password_input.clear()
-        password_input.send_keys(password)
+        _type_text(password_input, password)
         time.sleep(0.5)
         password_input.send_keys(Keys.ENTER)
 
@@ -422,7 +513,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
                 log(f"[{email}] Recovery email verification detected...")
                 for option in recovery_options:
                     if option.is_displayed():
-                        option.click()
+                        _human_click(driver, option)
                         time.sleep(2)
                         break
 
@@ -431,7 +522,7 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
                 if inp.is_displayed():
                     log(f"[{email}] Entering recovery email...")
                     inp.clear()
-                    inp.send_keys(recovery_email)
+                    _type_text(inp, recovery_email)
                     time.sleep(0.5)
                     inp.send_keys(Keys.ENTER)
                     time.sleep(3)
@@ -455,10 +546,10 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
             driver.get("https://myaccount.google.com/")
             time.sleep(3)
             if "myaccount.google.com" in driver.current_url:
-                log(f"[{email}] ✅ Login successful!")
+                log(f"[{email}] [OK] Login successful!")
                 return True
             # Not logged in — try signing in again
-            log(f"[{email}] ⚠️ Session not active, retrying login...")
+            log(f"[{email}] [WARN] Session not active, retrying login...")
             driver.get("https://accounts.google.com/signin")
             time.sleep(2)
 
@@ -466,10 +557,10 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
             driver.get("https://myaccount.google.com/")
             time.sleep(2)
             if "myaccount.google.com" in driver.current_url:
-                log(f"[{email}] ✅ Login successful!")
+                log(f"[{email}] [OK] Login successful!")
                 return True
 
-        log(f"[{email}] ⚠️ Login may have additional challenges. Current URL: {driver.current_url}")
+        log(f"[{email}] [WARN] Login may have additional challenges. Current URL: {driver.current_url}")
         time.sleep(3)
 
         # One more check
@@ -477,14 +568,14 @@ def login_google(driver, email, password, recovery_email, secret_code, on_log=No
         driver.get("https://myaccount.google.com/")
         time.sleep(3)
         if "myaccount.google.com" in driver.current_url:
-            log(f"[{email}] ✅ Login successful!")
+            log(f"[{email}] [OK] Login successful!")
             return True
 
-        log(f"[{email}] ❌ Login failed or requires manual intervention")
+        log(f"[{email}] [FAIL] Login failed or requires manual intervention")
         return False
 
     except Exception as e:
-        log(f"[{email}] ❌ Login error: {str(e)}")
+        log(f"[{email}] [FAIL] Login error: {str(e)}")
         traceback.print_exc()
         return False
 
@@ -531,7 +622,7 @@ def handle_2fa_challenge(driver, secret_code, email, on_log=None):
             for opt in options:
                 if opt.is_displayed():
                     log(f"[{email}] Found 2FA method chooser, selecting '{keyword}'...")
-                    opt.click()
+                    _human_click(driver, opt)
                     time.sleep(3)
                     break
     except Exception:
@@ -547,7 +638,7 @@ def handle_2fa_challenge(driver, secret_code, email, on_log=None):
                 for attempt in range(1, max_retries + 1):
                     totp_code = get_2fa_code(driver, secret_code, email, on_log)
                     if not totp_code:
-                        log(f"[{email}] ❌ Failed to get 2FA code (attempt {attempt}/{max_retries})")
+                        log(f"[{email}] [FAIL] Failed to get 2FA code (attempt {attempt}/{max_retries})")
                         if attempt < max_retries:
                             log(f"[{email}] ⏳ Waiting 5s before retry...")
                             time.sleep(5)
@@ -558,7 +649,7 @@ def handle_2fa_challenge(driver, secret_code, email, on_log=None):
                     # Re-find input after tab switch
                     inp = driver.find_element(By.CSS_SELECTOR, selector)
                     inp.clear()
-                    inp.send_keys(totp_code)
+                    _type_text(inp, totp_code)
                     time.sleep(0.5)
                     inp.send_keys(Keys.ENTER)
                     time.sleep(3)
@@ -567,14 +658,14 @@ def handle_2fa_challenge(driver, secret_code, email, on_log=None):
                     try:
                         page_text = driver.find_element(By.TAG_NAME, "body").text
                         if "Wrong code" in page_text or "wrong code" in page_text.lower():
-                            log(f"[{email}] ⚠️ Wrong code detected! Retrying...")
+                            log(f"[{email}] [WARN] Wrong code detected! Retrying...")
                             if attempt < max_retries:
                                 # Wait for next TOTP cycle (codes rotate every 30s)
                                 log(f"[{email}] ⏳ Waiting 10s for next TOTP cycle...")
                                 time.sleep(10)
                                 continue
                             else:
-                                log(f"[{email}] ❌ All {max_retries} 2FA attempts failed")
+                                log(f"[{email}] [FAIL] All {max_retries} 2FA attempts failed")
                                 return False
                     except Exception:
                         pass
@@ -635,7 +726,7 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
             # Handle 2FA challenge
             fa_result = handle_2fa_challenge(driver, secret_code, email, on_log)
             if not fa_result:
-                log(f"[{email}] ❌ 2FA re-verification failed")
+                log(f"[{email}] [FAIL] 2FA re-verification failed")
                 return None
 
             time.sleep(3)
@@ -654,7 +745,7 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
                 (By.CSS_SELECTOR, 'input[aria-label="App name"], input[type="text"]')
             ))
             app_name_input.clear()
-            app_name_input.send_keys("AAPW_AutoGen")
+            _type_text(app_name_input, "AAPW_AutoGen")
             time.sleep(1)
         except Exception:
             log(f"[{email}] Trying alternative input selector...")
@@ -663,12 +754,12 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
             for inp in inputs:
                 if inp.is_displayed():
                     inp.clear()
-                    inp.send_keys("AAPW_AutoGen")
+                    _type_text(inp, "AAPW_AutoGen")
                     found = True
                     time.sleep(1)
                     break
             if not found:
-                log(f"[{email}] ❌ Could not find app name input field")
+                log(f"[{email}] [FAIL] Could not find app name input field")
                 return None
 
         # Click Create button
@@ -677,14 +768,14 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
             create_btn = wait.until(EC.element_to_be_clickable(
                 (By.XPATH, "//button[contains(text(), 'Create') or contains(text(), 'Tạo')]")
             ))
-            create_btn.click()
+            _human_click(driver, create_btn)
         except Exception:
             buttons = driver.find_elements(By.TAG_NAME, "button")
             clicked = False
             for btn in buttons:
                 btn_text = btn.text.strip().lower()
                 if btn_text in ["create", "tạo", "generate"]:
-                    btn.click()
+                    _human_click(driver, btn)
                     clicked = True
                     break
             if not clicked:
@@ -750,19 +841,19 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
                 pass
 
         if app_password:
-            log(f"[{email}] ✅ App password generated: {app_password}")
+            log(f"[{email}] [OK] App password generated: {app_password}")
             try:
                 done_buttons = driver.find_elements(By.XPATH,
                     "//button[contains(text(), 'Done') or contains(text(), 'Xong') or contains(text(), 'OK')]")
                 for btn in done_buttons:
                     if btn.is_displayed():
-                        btn.click()
+                        _human_click(driver, btn)
                         break
             except Exception:
                 pass
             return app_password
         else:
-            log(f"[{email}] ❌ Could not extract app password. Check browser window.")
+            log(f"[{email}] [FAIL] Could not extract app password. Check browser window.")
             try:
                 driver.save_screenshot("debug_screenshot.png")
                 log(f"[{email}] Debug screenshot saved.")
@@ -771,7 +862,7 @@ def create_app_password(driver, email, secret_code, on_log=None, on_captcha=None
             return None
 
     except Exception as e:
-        log(f"[{email}] ❌ Error creating app password: {str(e)}")
+        log(f"[{email}] [FAIL] Error creating app password: {str(e)}")
         traceback.print_exc()
         return None
 
@@ -825,7 +916,7 @@ def process_account(email, password, recovery_email, secret_code, on_log=None, o
             result["error_detail"] = "Logged in but could not generate app password"
 
     except Exception as e:
-        log(f"[{email}] ❌ Unexpected error: {str(e)}")
+        log(f"[{email}] [FAIL] Unexpected error: {str(e)}")
         result["status"] = "error"
         result["error_detail"] = str(e)
     finally:
@@ -844,7 +935,10 @@ def process_accounts(accounts_text, on_log=None, on_result=None, on_captcha=None
     Process multiple accounts from text input.
 
     Args:
-        accounts_text: String with accounts in format email|password|recoveryEmail|secretCode (one per line)
+        accounts_text: String with one account per line. Supported formats (| or ' | ' separator):
+            email | password | 2FA
+            email | password | recoveryEmail | 2FA
+            email | password | recoveryEmail | 2FA | backupCodes | country | ...
         on_log: Callback for logging messages
         on_result: Callback for each account result
 
@@ -859,30 +953,37 @@ def process_accounts(accounts_text, on_log=None, on_result=None, on_captcha=None
     results = []
     lines = [line.strip() for line in accounts_text.strip().split("\n") if line.strip()]
 
-    log(f"📋 Found {len(lines)} account(s) to process")
+    log(f" Found {len(lines)} account(s) to process")
 
     for i, line in enumerate(lines, 1):
-        parts = line.split("|")
+        # Support both '|' and ' | ' as separators
+        parts = [p.strip() for p in line.split("|")]
         if len(parts) < 3:
-            log(f"⚠️ Skipping invalid line {i}: '{line}' (expected: email|password|secretCode or email|password|recoveryEmail|secretCode)")
+            log(f"[WARN] Skipping invalid line {i}: '{line}' (need at least 3 fields separated by |)")
             results.append({
-                "email": parts[0].strip() if parts else line,
+                "email": parts[0] if parts else line,
                 "app_password": None,
                 "status": "invalid_format",
                 "error_detail": f"Got {len(parts)} fields, need at least 3",
             })
             continue
 
-        email = parts[0].strip()
-        password = parts[1].strip()
+        email = parts[0]
+        password = parts[1]
+
         if len(parts) == 3:
-            # Short format: email|password|secretCode (no recovery email)
+            # Format: email | password | 2FA
             recovery_email = ""
-            secret_code = parts[2].strip()
+            secret_code = parts[2]
+        elif len(parts) == 4:
+            # Format: email | password | recoveryEmail | 2FA
+            recovery_email = parts[2]
+            secret_code = parts[3]
         else:
-            # Full format: email|password|recoveryEmail|secretCode
-            recovery_email = parts[2].strip()
-            secret_code = parts[3].strip()
+            # Format: email | password | recoveryEmail | 2FA | backupCodes | country | ...
+            # Fields beyond index 3 (backup codes, country, etc.) are not used
+            recovery_email = parts[2]
+            secret_code = parts[3]
 
         log(f"\n{'='*60}")
         log(f"🔄 Processing account {i}/{len(lines)}: {email}")
